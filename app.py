@@ -1,144 +1,84 @@
 import streamlit as st
 import pandas as pd
 import google.generativeai as genai
-import os
 
-# Set up the Streamlit app layout
-st.title("🤖 Chatbot for Transaction Data Analysis")
-st.subheader("Ask Questions About Your Transactions")
+# ตั้งค่า API Key
+GEMINI_API_KEY = "gemini_key_api"
+genai.configure(api_key=GEMINI_API_KEY)
 
-# Capture Gemini API Key
-if "GEMINI_API_KEY" not in st.secrets:
-    gemini_api_key = st.text_input("Gemini API Key: ", placeholder="Type your API Key here...", type="password")
-    if gemini_api_key:
-        os.environ["GOOGLE_API_KEY"] = gemini_api_key
-else:
-    os.environ["GOOGLE_API_KEY"] = st.secrets["GEMINI_API_KEY"]
-    st.success("Using Gemini API Key from Streamlit secrets.")
+# ตั้งค่าโมเดล
+model = genai.GenerativeModel('gemini-2.0-lite')  # ปรับชื่อโมเดลตามที่มีจริง
 
-# Initialize the Gemini Model
-model = None
-if os.environ.get("GOOGLE_API_KEY"):
-    try:
-        genai.configure(api_key=os.environ["GOOGLE_API_KEY"])
-        model = genai.GenerativeModel("gemini-2.0-flash-lite")
-        st.success("Gemini API Key successfully configured.")
-    except Exception as e:
-        st.error(f"An error occurred while setting up the Gemini model: {e}")
+# ฟังก์ชันสำหรับเรียก Gemini API
+def get_gemini_response(prompt):
+    response = model.generate_content(prompt)
+    return response.text
 
-# Initialize session state for storing chat history and data
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []  # Initialize with an empty list
+# ส่วนหัวของแอป
+st.title("Transaction & Data Dictionary Analyzer")
 
-if "data_dict" not in st.session_state:
-    st.session_state.data_dict = None  # Placeholder for data dictionary (CSV)
+# อัปโหลดไฟล์ CSV
+st.subheader("Upload CSV Files")
+data_dict_file = st.file_uploader("Upload Data Dictionary (CSV)", type="csv")
+transaction_file = st.file_uploader("Upload Transaction Data (CSV)", type="csv")
 
-if "transactions" not in st.session_state:
-    st.session_state.transactions = None  # Placeholder for transactions data (CSV)
+# ตัวแปรสำหรับเก็บข้อมูล
+data_dict_df = None
+transaction_df = None
 
-# Display previous chat history using st.chat_message
-for role, message in st.session_state.chat_history:
-    st.chat_message(role).markdown(message)
+# อ่านไฟล์เมื่ออัปโหลด
+if data_dict_file is not None:
+    data_dict_df = pd.read_csv(data_dict_file)
+    st.subheader("Data Dictionary Preview")
+    st.write(data_dict_df)
 
-# Create tabs for file uploads
-tab1, tab2 = st.tabs(["Upload Data Dictionary", "Upload Transactions"])
+if transaction_file is not None:
+    transaction_df = pd.read_csv(transaction_file)
+    st.subheader("Transaction Data Preview")
+    st.write(transaction_df.head())
 
-with tab1:
-    st.subheader("Upload Data Dictionary (CSV)")
-    uploaded_dict = st.file_uploader("Choose a CSV data dictionary file", type=["csv"], key="dict_uploader")
-    if uploaded_dict is not None:
-        try:
-            st.session_state.data_dict = pd.read_csv(uploaded_dict)
-            st.success("Data dictionary successfully uploaded and read as CSV.")
-            st.write("### Data Dictionary Preview")
-            st.dataframe(st.session_state.data_dict.head())
-        except Exception as e:
-            st.error(f"An error occurred while reading the data dictionary: {e}")
-
-with tab2:
-    st.subheader("Upload Transactions (CSV)")
-    uploaded_trans = st.file_uploader("Choose a CSV file for transactions", type=["csv"], key="trans_uploader")
-    if uploaded_trans is not None:
-        try:
-            st.session_state.transactions = pd.read_csv(uploaded_trans)
-            st.write("### Transactions Preview")
-            st.dataframe(st.session_state.transactions.head())
-            st.success("Transactions file successfully uploaded and read.")
-        except Exception as e:
-            st.error(f"An error occurred while reading the transactions file: {e}")
-
-# Capture user input and generate bot response
-if user_input := st.chat_input("Ask a question about your transactions..."):
-    # Store and display user message
-    st.session_state.chat_history.append(("user", user_input))
-    st.chat_message("user").markdown(user_input)
+# วิเคราะห์ข้อมูลเมื่อมีทั้งสองไฟล์
+if data_dict_df is not None and transaction_df is not None:
+    # สร้าง prompt สำหรับ Gemini
+    prompt = """
+    You are python code provider.
+    I have two CSV files:
+    1. Data Dictionary: Contains column descriptions
+    2. Transaction: Contains sales data
     
-    if model:
-        try:
-            if st.session_state.transactions is not None:
-                # Prepare RAG context from Transactions and Data Dictionary
-                context = []
-                
-                if st.session_state.data_dict is not None:
-                    context.append(f"Data Dictionary:\n{st.session_state.data_dict.to_string()}")
-                
-                if st.session_state.transactions is not None:
-                    context.append(f"Transactions Sample (limited to first 10 rows):\n{st.session_state.transactions.head(10).to_string()}")
-                
-                # If no data dictionary, still provide transaction data
-                if not context:
-                    context.append("No additional context available.")
-                
-                prompt = f"""
-                You are a chatbot designed to answer questions about transaction data. 
-                Use the following context to provide accurate and concise answers to the user's question: "{user_input}"
-                
-                Context:
-                {"".join(context)}
-                
-                If the question cannot be answered with the provided data, say so clearly.
-                """
-                
-                # Generate AI response with RAG
-                response = model.generate_content(prompt)
-                bot_response = response.text
-            else:
-                bot_response = "Please upload a Transactions CSV file to proceed."
-            
-            # Store and display the bot response
-            st.session_state.chat_history.append(("assistant", bot_response))
-            st.chat_message("assistant").markdown(bot_response)
-        except Exception as e:
-            st.error(f"An error occurred while generating the response: {e}")
-    else:
-        st.warning("Please configure the Gemini API Key to enable chat responses.")
+    Data Dictionary:
+    {data_dict}
+    
+    Transaction sample:
+    {transaction}
+    
+    Please provide:
+    1. Summary of the data
+    2. Your comments and observations
+    """
+    
+    # แปลงข้อมูลเป็น string เพื่อใส่ใน prompt
+    data_dict_str = data_dict_df.to_string()
+    transaction_str = transaction_df.head().to_string()
+    
+    final_prompt = prompt.format(
+        data_dict=data_dict_str,
+        transaction=transaction_str
+    )
+    
+    # เรียก Gemini API
+    with st.spinner("Analyzing with Gemini..."):
+        gemini_response = get_gemini_response(final_prompt)
+    
+    # แสดงผลลัพธ์
+    st.subheader("Analysis Results")
+    st.write("### Gemini Response:")
+    st.write(gemini_response)
 
-# Add instructions in the sidebar
-st.sidebar.markdown("## How to use this app")
-st.sidebar.markdown("""
-1. Enter your Gemini API Key
-2. Upload your Data Dictionary (CSV) - optional, provides context
-3. Upload your Transactions (CSV) - required
-4. Ask questions about your transaction data
+# เพิ่มคำแนะนำการใช้งาน
+st.sidebar.header("Instructions")
+st.sidebar.write("""
+1. Upload your Data Dictionary CSV file
+2. Upload your Transaction CSV file
+3. Wait for the analysis from Gemini model
 """)
-
-# Display app status in the sidebar
-st.sidebar.markdown("## App Status")
-status_items = []
-if os.environ.get("GOOGLE_API_KEY"):
-    status_items.append("✅ API Key configured")
-else:
-    status_items.append("❌ API Key not configured")
-
-if st.session_state.data_dict is not None:
-    status_items.append("✅ Data dictionary loaded")
-else:
-    status_items.append("❌ No data dictionary")
-
-if st.session_state.transactions is not None:
-    status_items.append("✅ Transactions loaded")
-else:
-    status_items.append("❌ No transactions data")
-
-for item in status_items:
-    st.sidebar.markdown(item)
