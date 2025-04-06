@@ -36,10 +36,10 @@ if "uploaded_data" not in st.session_state:
     st.session_state.uploaded_data = None  # Placeholder for uploaded CSV data
 
 if "data_dict" not in st.session_state:
-    st.session_state.data_dict = None  # Placeholder for data dictionary
+    st.session_state.data_dict = None  # Placeholder for data dictionary (now CSV)
 
 if "transactions" not in st.session_state:
-    st.session_state.transactions = None  # Placeholder for transactions data
+    st.session_state.transactions = None  # Placeholder for transactions data (now CSV)
 
 # Display previous chat history using st.chat_message
 for role, message in st.session_state.chat_history:
@@ -64,32 +64,27 @@ with tab1:
 
 with tab2:
     st.subheader("Upload Data Dictionary")
-    uploaded_dict = st.file_uploader("Choose a JSON data dictionary file", type=["json"], key="dict_uploader")
+    uploaded_dict = st.file_uploader("Choose a CSV data dictionary file", type=["csv"], key="dict_uploader")
     if uploaded_dict is not None:
         try:
-            import json
-            st.session_state.data_dict = json.load(uploaded_dict)
-            st.success("Data dictionary successfully uploaded and read.")
+            # Load the uploaded CSV file as a pandas DataFrame
+            st.session_state.data_dict = pd.read_csv(uploaded_dict)
+            st.success("Data dictionary successfully uploaded and read as CSV.")
             st.write("### Data Dictionary Preview")
-            st.json(st.session_state.data_dict)
+            # Display the CSV content as a DataFrame
+            st.dataframe(st.session_state.data_dict.head())
         except Exception as e:
             st.error(f"An error occurred while reading the data dictionary: {e}")
 
 with tab3:
     st.subheader("Upload Transactions")
-    uploaded_trans = st.file_uploader("Choose a CSV or JSON file for transactions", type=["csv", "json"], key="trans_uploader")
+    uploaded_trans = st.file_uploader("Choose a CSV file for transactions", type=["csv"], key="trans_uploader")
     if uploaded_trans is not None:
         try:
-            file_extension = uploaded_trans.name.split('.')[-1].lower()
-            if file_extension == 'csv':
-                st.session_state.transactions = pd.read_csv(uploaded_trans)
-                st.write("### Transactions Preview (CSV)")
-                st.dataframe(st.session_state.transactions.head())
-            else:  # JSON
-                import json
-                st.session_state.transactions = json.load(uploaded_trans)
-                st.write("### Transactions Preview (JSON)")
-                st.json(st.session_state.transactions)
+            # Load the uploaded CSV file
+            st.session_state.transactions = pd.read_csv(uploaded_trans)
+            st.write("### Transactions Preview (CSV)")
+            st.dataframe(st.session_state.transactions.head())
             st.success("Transactions file successfully uploaded and read.")
         except Exception as e:
             st.error(f"An error occurred while reading the transactions file: {e}")
@@ -150,15 +145,10 @@ if user_input := st.chat_input("Type your message here..."):
                             context.append(f"CSV Sample:\n{st.session_state.uploaded_data.head(5).to_string()}")
                         
                         if st.session_state.data_dict is not None:
-                            import json
-                            context.append(f"Data Dictionary:\n{json.dumps(st.session_state.data_dict, indent=2)}")
+                            context.append(f"Data Dictionary Sample:\n{st.session_state.data_dict.head(5).to_string()}")
                         
                         if st.session_state.transactions is not None:
-                            if isinstance(st.session_state.transactions, pd.DataFrame):
-                                context.append(f"Transactions Sample:\n{st.session_state.transactions.head(5).to_string()}")
-                            else:
-                                import json
-                                context.append(f"Transactions Data:\n{json.dumps(st.session_state.transactions, indent=2)[:1000]}")
+                            context.append(f"Transactions Sample:\n{st.session_state.transactions.head(5).to_string()}")
                         
                         prompt = f"""
                         Based on the following data context, please answer this question: "{user_input}"
@@ -195,7 +185,7 @@ if user_input := st.chat_input("Type your message here..."):
 st.sidebar.markdown("## How to use this app")
 st.sidebar.markdown("""
 1. Enter your Gemini API Key
-2. Upload your data files (CSV, Data Dictionary, Transactions)
+2. Upload your data files (CSV, Data Dictionary, Transactions) - all in CSV format
 3. Check the 'Analyze Data with AI' checkbox
 4. Choose your analysis method
 5. Ask questions about your data
