@@ -4,13 +4,17 @@ import google.generativeai as genai
 import os
 import tempfile
 import json
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+
+# Update imports to use the latest LangChain structure
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
-from langchain_community.document_loaders import CSVLoader, JSONLoader
-from langchain.prompts import PromptTemplate
+from langchain_community.document_loaders import CSVLoader
+from langchain_community.document_loaders.json_loader import JSONLoader
+from langchain_core.prompts import PromptTemplate
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain.chains import ConversationalRetrievalChain
+from langchain_core.output_parsers import StrOutputParser
+from langchain.chains.conversational_retrieval.base import ConversationalRetrievalChain
 
 # Set up the Streamlit app layout
 st.title("🤖 RAG-powered Chatbot and Data Analysis App")
@@ -94,6 +98,16 @@ with tab3:
         except Exception as e:
             st.error(f"An error occurred while reading the transactions file: {e}")
 
+# Custom function to handle JSON loading
+def _extract_json_content(record, jq_schema):
+    """Extract content from a JSON record based on jq schema."""
+    if isinstance(record, dict):
+        return json.dumps(record)
+    elif isinstance(record, str):
+        return record
+    else:
+        return str(record)
+
 # Build RAG system if all required components are present
 build_rag = st.button("Build RAG System")
 if build_rag and os.environ.get("GOOGLE_API_KEY"):
@@ -115,13 +129,21 @@ if build_rag and os.environ.get("GOOGLE_API_KEY"):
                 with tempfile.NamedTemporaryFile(delete=False, suffix='.json') as temp_dict:
                     json.dump(st.session_state.data_dict, temp_dict)
                     temp_dict.flush()
-                    # Use JSON loader with custom jq expression to handle different JSON structures
-                    loader = JSONLoader(
-                        file_path=temp_dict.name,
-                        jq_schema='.',
-                        text_content=False
-                    )
-                    documents.extend(loader.load())
+                    # Use JSON loader with custom jq expression
+                    try:
+                        loader = JSONLoader(
+                            file_path=temp_dict.name,
+                            jq_schema='.',
+                            content_key=None,  # Extract full content
+                            text_content=False
+                        )
+                        documents.extend(loader.load())
+                    except:
+                        # Fallback if JSONLoader has issues
+                        with open(temp_dict.name, 'r') as f:
+                            dict_text = f.read()
+                            from langchain_core.documents import Document
+                            documents.append(Document(page_content=dict_text))
                 os.unlink(temp_dict.name)
             
             # Process transactions if available
@@ -136,12 +158,20 @@ if build_rag and os.environ.get("GOOGLE_API_KEY"):
                     with tempfile.NamedTemporaryFile(delete=False, suffix='.json') as temp_trans:
                         json.dump(st.session_state.transactions, temp_trans)
                         temp_trans.flush()
-                        loader = JSONLoader(
-                            file_path=temp_trans.name,
-                            jq_schema='.',
-                            text_content=False
-                        )
-                        documents.extend(loader.load())
+                        try:
+                            loader = JSONLoader(
+                                file_path=temp_trans.name,
+                                jq_schema='.',
+                                content_key=None,  # Extract full content
+                                text_content=False
+                            )
+                            documents.extend(loader.load())
+                        except:
+                            # Fallback if JSONLoader has issues
+                            with open(temp_trans.name, 'r') as f:
+                                trans_text = f.read()
+                                from langchain_core.documents import Document
+                                documents.append(Document(page_content=trans_text))
                     os.unlink(temp_trans.name)
             
             if documents:
@@ -269,3 +299,11 @@ if user_input := st.chat_input("Type your message here..."):
             
         except Exception as e:
             st.error(f"An error occurred while generating the response: {e}")
+
+# Add requirements info at the bottom
+st.sidebar.markdown("### Required Packages")
+st.sidebar.code("""
+pip install streamlit pandas google-generativeai
+pip install langchain-text-splitters langchain-community 
+pip install langchain-google-genai langchain-core faiss-cpu
+""")
